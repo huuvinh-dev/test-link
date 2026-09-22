@@ -8,7 +8,7 @@ from urllib.parse import unquote, urljoin
 # -------------------- CẤU HÌNH --------------------
 CHECK_HEALTH = False   # False: tắt kiểm tra link sống (chạy nhanh)
 ENABLE_EPG = False      # False: tắt tải EPG
-SHOW_SOURCE = True     # True: hiện dòng '# Nguồn: ...', False: ẩn dòng nguồn
+SHOW_SOURCE = True     # True: ghi nguồn vào thuộc tính tvg-source trong #EXTINF
 SPECIAL_URL = "https://raw.githubusercontent.com/t23-02/bongda/refs/heads/main/bongda.m3u"
 
 # Danh sách kênh VTV (chuẩn)
@@ -468,13 +468,14 @@ def main():
                     extinf = f'#EXTINF:-1 tvg-id="{tvg_id}" group-title="{group_name}"'
                     if tvg_logo:
                         extinf += f' tvg-logo="{tvg_logo}"'
-                    extinf += f',{name_display}'
-                    
-                    # Ghi chú nguồn gốc file M3U (nếu bật SHOW_SOURCE)
+
+                    # Ghi nguồn trực tiếp vào #EXTINF để nguồn luôn đi cùng stream.
                     if SHOW_SOURCE:
-                        source_url = ch.get('source', 'Không rõ nguồn')
-                        f.write(f'# Nguồn: {source_url}\n')
-                    
+                        source_url = ch.get('source', '')
+                        if source_url:
+                            extinf += f' tvg-source="{source_url}"'
+
+                    extinf += f',{name_display}'
                     f.write(extinf + '\n')
                     
                     if 'extra' in ch:
