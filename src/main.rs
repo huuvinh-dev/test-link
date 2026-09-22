@@ -475,34 +475,67 @@ fn write_cleaned_playlist(
     writeln!(writer, "#ORDER-PRESERVATION: Original order maintained")?;
     writeln!(writer, "########################################")?;
 
-    let mut last_metadata: Option<&PlaylistEntry> = None;
+    // Xử lý mỗi channel như một block: #EXTINF + các dòng phụ + URL.
+    // Chỉ ghi toàn bộ block khi URL tương ứng hợp lệ.
+    // Nhờ vậy KODIPROP/comment của stream bị loại sẽ không còn orphan.
+    let mut pending_metadata: Option<&PlaylistEntry> = None;
+    let mut pending_comments: Vec<&PlaylistEntry> = Vec::new();
+
     for entry in &playlist.entries {
         match entry.entry_type {
             EntryType::Header => {}
+
             EntryType::Metadata => {
-                last_metadata = Some(entry);
+                pending_metadata = Some(entry);
+                pending_comments.clear();
             }
-            EntryType::StreamUrl if entry.is_valid => {
-                if let Some(meta) = last_metadata.take() {
-                    writeln!(writer, "{}", meta.content)?;
+
+            EntryType::Comment => {
+                // KODIPROP và comment được giữ tạm cho đến khi gặp URL.
+                if pending_metadata.is_some() {
+                    pending_comments.push(entry);
                 }
-                if let Some(ua) = &entry.vlc_user_agent {
-                    writeln!(writer, "#EXTVLCOPT:http-user-agent={}", ua)?;
-                }
-                if let Some(cookie) = &entry.vlc_cookie {
-                    writeln!(writer, "#EXTVLCOPT:http-cookie={}", cookie)?;
-                }
-                for (k, v) in &entry.vlc_headers {
-                    writeln!(writer, "#EXTVLCOPT:http-header={}: {}", k, v)?;
-                }
-                writeln!(writer, "{}", entry.content)?;
             }
-            EntryType::Comment | EntryType::Empty | EntryType::VlcOpt => {
-                if entry.entry_type != EntryType::VlcOpt {
+
+            EntryType::VlcOpt => {
+                // EXTVLCOPT đã được gắn vào StreamUrl trong parse_playlist_content().
+                // Không ghi ở đây để tránh duplicate/orphan.
+            }
+
+            EntryType::StreamUrl => {
+                if entry.is_valid {
+                    if let Some(meta) = pending_metadata.take() {
+                        writeln!(writer, "{}", meta.content)?;
+                    }
+
+                    // Chỉ ghi KODIPROP/comment thuộc stream hợp lệ.
+                    for comment in pending_comments.drain(..) {
+                        writeln!(writer, "{}", comment.content)?;
+                    }
+
+                    if let Some(ua) = &entry.vlc_user_agent {
+                        writeln!(writer, "#EXTVLCOPT:http-user-agent={}", ua)?;
+                    }
+
+                    if let Some(cookie) = &entry.vlc_cookie {
+                        writeln!(writer, "#EXTVLCOPT:http-cookie={}", cookie)?;
+                    }
+
+                    for (k, v) in &entry.vlc_headers {
+                        writeln!(writer, "#EXTVLCOPT:http-header={}: {}", k, v)?;
+                    }
+
                     writeln!(writer, "{}", entry.content)?;
+                } else {
+                    // Stream không hợp lệ: bỏ cả metadata và ancillary lines.
+                    pending_metadata = None;
+                    pending_comments.clear();
                 }
             }
-            _ => {}
+
+            EntryType::Empty => {
+                // Không ghi empty line của block đang chờ.
+            }
         }
     }
 
